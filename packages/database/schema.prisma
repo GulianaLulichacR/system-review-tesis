@@ -1,0 +1,513 @@
+// packages/database/prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== USUARIOS Y AUTENTICACIÓN ====================
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  passwordHash  String
+  firstName     String
+  lastName      String
+  role          UserRole  @default(STUDENT)
+  avatarUrl     String?
+  isActive      Boolean   @default(true)
+  emailVerified DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relaciones
+  studentProfile   StudentProfile?
+  advisorProfile   AdvisorProfile?
+  refreshTokens    RefreshToken[]
+  auditLogs        AuditLog[]
+  uploadedDocuments Document[]      @relation("UploadedBy")
+  reviews          Review[]         @relation("ReviewedBy")
+  notifications    Notification[]
+
+  @@index([email])
+  @@index([role])
+}
+
+model StudentProfile {
+  id              String    @id @default(cuid())
+  userId          String    @unique
+  studentCode     String    @unique
+  programId       String
+  advisorId       String?
+  thesisTitle     String?
+  enrollmentDate  DateTime  @default(now())
+  
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  program         Program   @relation(fields: [programId], references: [id])
+  advisor         User?     @relation("AdvisorStudent", fields: [advisorId], references: [id])
+  documents       Document[]
+
+  @@index([studentCode])
+  @@index([programId])
+}
+
+model AdvisorProfile {
+  id              String    @id @default(cuid())
+  userId          String    @unique
+  department      String?
+  specialization  String?
+  maxStudents     Int       @default(10)
+  
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  students        User[]    @relation("AdvisorStudent")
+  
+  @@index([userId])
+}
+
+enum UserRole {
+  STUDENT
+  ADVISOR
+  COORDINATOR
+  ADMIN
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([token])
+  @@index([userId])
+}
+
+// ==================== PROGRAMAS ACADÉMICOS ====================
+
+model Program {
+  id            String    @id @default(cuid())
+  name          String
+  code          String    @unique
+  faculty       String
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  
+  students      StudentProfile[]
+  templates     TemplateDocument[]
+  periods       AcademicPeriod[]
+  
+  @@index([code])
+}
+
+model AcademicPeriod {
+  id            String    @id @default(cuid())
+  programId     String
+  name          String    // "2025-II"
+  startDate     DateTime
+  endDate       DateTime
+  isActive      Boolean   @default(true)
+  
+  program       Program   @relation(fields: [programId], references: [id])
+  documents     Document[]
+  
+  @@unique([programId, name])
+  @@index([programId, isActive])
+}
+
+// ==================== DOCUMENTOS PATRÓN (TEMPLATES) ====================
+
+model TemplateDocument {
+  id                String          @id @default(cuid())
+  programId         String
+  name              String
+  version           String
+  description       String?
+  filePath          String
+  fileSize          Int
+  fileType          String
+  structureJson     Json?           // Estructura extraída del patrón
+  rubricConfig      Json?           // Configuración de rúbrica
+  isActive          Boolean         @default(true)
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  program           Program         @relation(fields: [programId], references: [id])
+  templateSections  TemplateSection[]
+  documentVersions  DocumentVersion[]
+  
+  @@unique([programId, version])
+  @@index([programId, isActive])
+}
+
+model TemplateSection {
+  id                String    @id @default(cuid())
+  templateId        String
+  sectionOrder      Int
+  title             String
+  parentSectionId   String?
+  isRequired        Boolean   @default(true)
+  suggestedLength   Int?      // Palabras sugeridas
+  description       String?
+  weight            Float     @default(1.0)  // Peso en la evaluación
+  
+  template          TemplateDocument   @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  parentSection     TemplateSection?   @relation("SectionHierarchy", fields: [parentSectionId], references: [id], onDelete: Cascade)
+  childSections     TemplateSection[]  @relation("SectionHierarchy")
+  
+  @@unique([templateId, sectionOrder])
+  @@index([templateId])
+}
+
+// ==================== DOCUMENTOS Y AVANCES ====================
+
+model Document {
+  id              String    @id @default(cuid())
+  studentId       String
+  academicPeriodId String
+  documentType    DocumentType
+  title           String
+  description     String?
+  status          DocumentStatus @default(UPLOADED)
+  filePath        String
+  fileSize        Int
+  fileType        String
+  pageCount       Int?
+  wordCount       Int?
+  uploadedById    String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  student         StudentProfile   @relation(fields: [studentId], references: [id])
+  academicPeriod  AcademicPeriod   @relation(fields: [academicPeriodId], references: [id])
+  uploadedBy      User             @relation("UploadedBy", fields: [uploadedById], references: [id])
+  versions        DocumentVersion[]
+  latestVersion   DocumentVersion? @relation("LatestVersion")
+  reviews         Review[]
+  
+  @@index([studentId, status])
+  @@index([academicPeriodId])
+}
+
+enum DocumentType {
+  CHAPTER_1       // Introducción, Problema, Objetivos
+  CHAPTER_2       // Marco Teórico
+  CHAPTER_3       // Metodología
+  CHAPTER_4       // Resultados
+  CHAPTER_5       // Discusión y Conclusiones
+  FULL_THESIS     // Tesis completa
+  PROPOSAL        // Propuesta de tesis
+  ADVANCE         // Avance general
+}
+
+enum DocumentStatus {
+  UPLOADED
+  PROCESSING_AI
+  AI_COMPLETED
+  PENDING_REVIEW
+  UNDER_REVIEW
+  OBSERVED
+  APPROVED
+  REJECTED
+}
+
+model DocumentVersion {
+  id              String    @id @default(cuid())
+  documentId      String
+  versionNumber   Int
+  templateId      String?
+  filePath        String
+  fileSize        Int
+  extractedText   String?   @db.Text
+  structureJson   Json?     // Estructura extraída
+  uploadedAt      DateTime  @default(now())
+  
+  document        Document  @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  template        TemplateDocument? @relation(fields: [templateId], references: [id])
+  aiAnalysis      AIAnalysis?
+  review          Review?
+  
+  @@unique([documentId, versionNumber])
+  @@index([documentId])
+}
+
+// ==================== ANÁLISIS DE IA ====================
+
+model AIAnalysis {
+  id                      String    @id @default(cuid())
+  documentVersionId       String    @unique
+  status                  AnalysisStatus @default(PENDING)
+  startedAt               DateTime?
+  completedAt             DateTime?
+  processingTimeMs        Int?
+  modelUsed               String?
+  
+  // Resultados principales
+  overallScore            Float?    // 0-100
+  structureScore          Float?    // 0-100
+  contentScore            Float?    // 0-100
+  formScore               Float?    // 0-100
+  originalityScore        Float?    // 0-100
+  
+  // Detalles del análisis
+  structureAnalysis       Json?     // Análisis de estructura
+  contentAnalysis         Json?     // Análisis de contenido
+  detectedSections        Json?     // Secciones detectadas
+  missingSections         Json?     // Secciones faltantes
+  
+  // Retroalimentación generada
+  executiveSummary        String?   @db.Text
+  strengths               Json?     // Lista de fortalezas
+  weaknesses              Json?     // Lista de debilidades
+  
+  // Metadata
+  tokensUsed              Int?
+  estimatedCost           Float?
+  errorMessage            String?   @db.Text
+  
+  createdAt               DateTime  @default(now())
+  
+  documentVersion         DocumentVersion @relation(fields: [documentVersionId], references: [id], onDelete: Cascade)
+  findings                AIFinding[]
+  
+  @@index([status])
+}
+
+enum AnalysisStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+model AIFinding {
+  id              String      @id @default(cuid())
+  analysisId      String
+  findingType     FindingType
+  severity        Severity
+  title           String
+  description     String      @db.Text
+  sectionRef      String?     // Referencia a sección
+  pageNumber      Int?
+  
+  // Retroalimentación accionable
+  correctionInstruction  String? @db.Text
+  improvementExample     String? @db.Text
+  recommendation         String? @db.Text
+  
+  // Estado de revisión humana
+  reviewerStatus    ReviewerStatus @default(PENDING)
+  reviewerComment   String? @db.Text
+  reviewedAt        DateTime?
+  reviewedById      String?
+  
+  createdAt       DateTime    @default(now())
+  
+  analysis        AIAnalysis  @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  
+  @@index([analysisId, severity])
+  @@index([reviewerStatus])
+}
+
+enum FindingType {
+  MISSING_SECTION
+  STRUCTURAL_ERROR
+  CONTENT_ERROR
+  FORM_ERROR
+  FORMATTING_ISSUE
+  CITATION_ISSUE
+  COHERENCE_ISSUE
+  LANGUAGE_ISSUE
+  SUGGESTION
+}
+
+enum Severity {
+  CRITICAL
+  MAJOR
+  MINOR
+  SUGGESTION
+}
+
+enum ReviewerStatus {
+  PENDING
+  ACCEPTED
+  MODIFIED
+  DISCARDED
+}
+
+// ==================== REVISIONES HUMANAS ====================
+
+model Review {
+  id              String    @id @default(cuid())
+  documentVersionId String
+  reviewerId      String
+  status          ReviewStatus @default(PENDING)
+  
+  // Calificaciones
+  aiScore        Float?    // Nota sugerida por IA
+  humanScore     Float?    // Nota asignada por humano
+  finalScore     Float?    // Nota final
+  
+  // Dimensiones de evaluación
+  structureGrade   Float?
+  contentGrade     Float?
+  formGrade        Float?
+  originalityGrade Float?
+  
+  // Comentarios
+  generalComment   String? @db.Text
+  privateNotes     String? @db.Text
+  
+  // Decisión
+  decision       ReviewDecision?
+  decisionReason String? @db.Text
+  
+  startedAt      DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  
+  documentVersion  DocumentVersion @relation(fields: [documentVersionId], references: [id])
+  reviewer         User            @relation("ReviewedBy", fields: [reviewerId], references: [id])
+  annotations      Annotation[]
+  
+  @@unique([documentVersionId, reviewerId])
+  @@index([reviewerId, status])
+}
+
+enum ReviewStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum ReviewDecision {
+  APPROVED
+  APPROVED_WITH_OBSERVATIONS
+  NEEDS_REVISION
+  REJECTED
+}
+
+model Annotation {
+  id          String    @id @default(cuid())
+  reviewId    String
+  pageNumber  Int
+  positionX   Float?    // Posición relativa en la página
+  positionY   Float?
+  textRef     String?   @db.Text // Texto seleccionado
+  comment     String    @db.Text
+  category    String?
+  createdAt   DateTime  @default(now())
+  
+  review      Review    @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  
+  @@index([reviewId])
+}
+
+// ==================== EMBEDDINGS (pgvector) ====================
+
+model DocumentEmbedding {
+  id              String    @id @default(cuid())
+  documentVersionId String
+  chunkIndex      Int
+  chunkText       String    @db.Text
+  embedding       Unsupported("vector")?
+  sectionRef      String?
+  createdAt       DateTime  @default(now())
+  
+  @@unique([documentVersionId, chunkIndex])
+  @@index([documentVersionId])
+}
+
+model TemplateEmbedding {
+  id              String    @id @default(cuid())
+  templateId      String
+  chunkIndex      Int
+  chunkText       String    @db.Text
+  embedding       Unsupported("vector")?
+  sectionRef      String?
+  createdAt       DateTime  @default(now())
+  
+  @@unique([templateId, chunkIndex])
+  @@index([templateId])
+}
+
+// ==================== NOTIFICACIONES Y AUDITORÍA ====================
+
+model Notification {
+  id          String    @id @default(cuid())
+  userId      String
+  type        NotificationType
+  title       String
+  message     String    @db.Text
+  data        Json?
+  isRead      Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId, isRead])
+  @@index([createdAt])
+}
+
+enum NotificationType {
+  DOCUMENT_UPLOADED
+  AI_ANALYSIS_COMPLETED
+  REVIEW_ASSIGNED
+  REVIEW_COMPLETED
+  DOCUMENT_APPROVED
+  DOCUMENT_REJECTED
+  DEADLINE_REMINDER
+  SYSTEM_ALERT
+}
+
+model AuditLog {
+  id          String    @id @default(cuid())
+  userId      String?
+  action      String
+  entityType  String
+  entityId    String?
+  oldValue    Json?
+  newValue    Json?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime  @default(now())
+  
+  user        User?     @relation(fields: [userId], references: [id])
+  
+  @@index([entityType, entityId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+// ==================== CONFIGURACIÓN DEL SISTEMA ====================
+
+model SystemConfig {
+  id              String    @id @default(cuid())
+  key             String    @unique
+  value           Json
+  description     String?
+  updatedAt       DateTime  @updatedAt
+  updatedById     String?
+  
+  @@index([key])
+}
+
+model EmailTemplate {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  subject     String
+  bodyHtml    String    @db.Text
+  bodyText    String?   @db.Text
+  variables   Json?     // Lista de variables disponibles
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  @@index([name])
+}
