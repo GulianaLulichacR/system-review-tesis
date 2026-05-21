@@ -1,0 +1,35 @@
+version: '3.9'
+
+services:
+  # 1. Base de Datos PostgreSQL
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: thesis-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: thesis
+      POSTGRES_PASSWORD: thesis_secret
+      POSTGRES_DB: thesis_review
+    ports:
+      - "5432:5432" # IMPORTANTE: Dejar abierto para que n8n Cloud pueda conectarse
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # 2. Almacenamiento de Archivos MinIO
+  minio:
+    image: minio/minio:latest
+    container_name: thesis-minio
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin_secret
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+
+volumes:
+  postgres_data:
+  minio_data:

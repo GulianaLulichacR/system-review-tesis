@@ -1,0 +1,203 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// 1. Enum para roles
+enum UserRole {
+  STUDENT
+  ADVISOR
+  COORDINATOR
+  ADMIN
+}
+
+// 2. Usuario
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  firstName    String
+  lastName     String
+  role         UserRole @default(STUDENT)
+  avatarUrl    String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  studentProfile  StudentProfile?
+  refreshTokens   RefreshToken[]
+  uploadedDocs    Document[]       @relation("UploadedBy")
+  reviews         Review[]         @relation("ReviewedBy")
+
+  @@index([email])
+  @@index([role])
+}
+
+// 3. Programa Académico
+model Program {
+  id         String   @id @default(cuid())
+  name       String
+  code       String   @unique
+  faculty    String
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  students       StudentProfile[]
+  templates      TemplateDocument[]
+  academicPeriods AcademicPeriod[]
+}
+
+// 4. Período Académico
+model AcademicPeriod {
+  id        String   @id @default(cuid())
+  programId String
+  name      String
+  startDate DateTime
+  endDate   DateTime
+  isActive  Boolean  @default(true)
+
+  program   Program @relation(fields: [programId], references: [id], onDelete: Cascade)
+
+  @@unique([programId, name])
+}
+
+// 5. Perfil de Estudiante
+model StudentProfile {
+  id             String   @id @default(cuid())
+  userId         String   @unique
+  studentCode    String   @unique
+  programId      String
+  advisorId      String?
+  thesisTitle    String?
+  enrollmentDate DateTime @default(now())
+
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  program   Program @relation(fields: [programId], references: [id], onDelete: Cascade)
+  documents Document[]
+
+  @@index([studentCode])
+}
+
+// 6. Tokens de Sesión
+model RefreshToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// 7. Documentos Patrón
+model TemplateDocument {
+  id            String   @id @default(cuid())
+  programId     String
+  name          String
+  version       String
+  description   String?
+  filePath      String
+  structureJson Json?
+  rubricConfig  Json?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  program Program @relation(fields: [programId], references: [id], onDelete: Cascade)
+
+  @@unique([programId, version])
+}
+
+// 8. Documentos
+model Document {
+  id               String   @id @default(cuid())
+  studentId        String
+  academicPeriodId String?
+  documentType     String
+  title            String
+  description      String?
+  status           String   @default("UPLOADED")
+  filePath         String
+  fileSize         Int
+  fileType         String
+  uploadedById     String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  student   StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  uploader  User           @relation("UploadedBy", fields: [uploadedById], references: [id], onDelete: Cascade)
+  versions  DocumentVersion[]
+
+  @@index([studentId])
+}
+
+// 9. Versiones de Documentos
+model DocumentVersion {
+  id            String   @id @default(cuid())
+  documentId    String
+  versionNumber Int
+  filePath      String
+  fileSize      Int
+  extractedText String?
+  uploadedAt    DateTime @default(now())
+
+  document   Document  @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  aiAnalysis AIAnalysis?
+  review     Review?
+
+  @@unique([documentId, versionNumber])
+}
+
+// 10. Análisis de IA
+model AIAnalysis {
+  id                String   @id @default(cuid())
+  documentVersionId String   @unique
+  status            String   @default("PENDING")
+  overallScore      Float?
+  structureScore    Float?
+  contentScore      Float?
+  formScore         Float?
+  executiveSummary  String?
+  rawOutput         Json?
+  createdAt         DateTime @default(now())
+
+  documentVersion DocumentVersion @relation(fields: [documentVersionId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+}
+
+// 11. Revisiones Humanas
+model Review {
+  id               String   @id @default(cuid())
+  documentVersionId String   @unique
+  reviewerId       String
+  status           String   @default("PENDING")
+  humanScore       Float?
+  finalScore       Float?
+  generalComment   String?
+  decision         String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  documentVersion DocumentVersion @relation(fields: [documentVersionId], references: [id], onDelete: Cascade)
+  reviewer        User            @relation("ReviewedBy", fields: [reviewerId], references: [id], onDelete: Cascade)
+}
+
+// 12. Tabla para Búsqueda de Plagio (AdvanceChunk)
+// Nota: Usamos Unsupported para el tipo vector
+model AdvanceChunk {
+  id         String                     @id @default(cuid())
+  advance_id String?
+  program_id String?
+  chunk_text String?
+  embedding  Unsupported("vector(1536)")?
+}

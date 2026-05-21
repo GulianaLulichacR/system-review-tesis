@@ -1,0 +1,75 @@
+{
+  "name": "Pipeline de Análisis de Tesis",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "analyze",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "WebhookTrigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "position": [250, 300],
+      "webhookId": "analyze-doc"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM \"TemplateDocument\" WHERE id = '{{ $json.body.templateId }}';",
+        "options": {}
+      },
+      "id": "GetTemplate",
+      "name": "Get Template from DB",
+      "type": "n8n-nodes-base.postgres",
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "model": "gpt-4o",
+        "prompt": {
+          "messages": [
+            {
+              "role": "system",
+              "content": "Eres un experto académico. Evalúa el siguiente texto."
+            },
+            {
+              "role": "user", 
+              "content": "Texto del estudiante: ... (aquí iría la lógica de extracción previa)"
+            }
+          ]
+        }
+      },
+      "id": "OpenAIAnalysis",
+      "name": "OpenAI Analysis",
+      "type": "@langchain.openai",
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": "AIAnalysis",
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        }
+      },
+      "id": "SaveResults",
+      "name": "Save Analysis to DB",
+      "type": "n8n-nodes-base.postgres",
+      "position": [850, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [[{"node": "Get Template from DB", "type": "main", "index": 0}]]
+    },
+    "Get Template from DB": {
+      "main": [[{"node": "OpenAI Analysis", "type": "main", "index": 0}]]
+    },
+    "OpenAI Analysis": {
+      "main": [[{"node": "Save Analysis to DB", "type": "main", "index": 0}]]
+    }
+  }
+}
