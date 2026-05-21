@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 10, "column": 0}, "map": {"version":3,"sources":["file:///D:/TESIS/system-review-tesis/apps/web/app/page.tsx"],"sourcesContent":["export default function HomePage() {\r\n  return <h1>Hola Mundo</h1>;\r\n}"],"names":["HomePage"],"mappings":";;;;;;AAAe,SAASA;IACtB,qBAAO,8OAAC;kBAAG;;;;;;AACb"}}]
+}
